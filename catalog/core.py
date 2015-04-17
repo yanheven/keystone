@@ -63,6 +63,7 @@ def format_url(url, data):
 
 
 @dependency.provider('catalog_api')
+@dependency.requires('identity_api')
 class Manager(manager.Manager):
     """Default pivot point for the Catalog backend.
 
@@ -84,6 +85,10 @@ class Manager(manager.Manager):
             msg = _('Duplicate ID, %s.') % region_ref['id']
             raise exception.Conflict(type='region', details=msg)
 
+        if region_ref.get('owner') is not None:
+            # Ensure that the owner exists
+            self.identity_api.get_user(region_ref['owner'])
+
         try:
             return self.driver.create_region(region_ref)
         except exception.NotFound:
@@ -96,11 +101,20 @@ class Manager(manager.Manager):
         except exception.NotFound:
             raise exception.RegionNotFound(region_id=region_id)
 
+    def update_region(self, region_id, region_ref):
+        if region_ref.get('owner') is not None:
+            raise exception.ValidationError(_('Cannot change owner'))
+        return self.driver.update_region(region_id, region_ref)
+
     def delete_region(self, region_id):
         try:
             return self.driver.delete_region(region_id)
         except exception.NotFound:
             raise exception.RegionNotFound(region_id=region_id)
+
+    @manager.response_truncated
+    def list_regions(self, hints=None):
+        return self.driver.list_regions(hints or driver_hints.Hints())
 
     def create_service(self, service_id, service_ref):
         service_ref.setdefault('enabled', True)
@@ -170,13 +184,28 @@ class Driver(object):
         raise exception.NotImplemented()
 
     @abc.abstractmethod
-    def list_regions(self):
+    def list_regions(self, hints):
         """List all regions.
+
+        :param hints: contains the list of filters yet to be satisfied.
+                      Any filters satisfied here will be removed so that
+                      the caller will know if any filters remain.
 
         :returns: list of region_refs or an empty list.
 
         """
-        raise exception.NotImplemented()
+        raise exception.NotImplemented()  # pragma: no cover
+
+    @abc.abstractmethod
+    def list_regions_for_owner(self, owner):
+        """List regions for owner.
+
+        :param owner: a user who own regions.
+
+        :returns: list of region_refs or an empty list.
+
+        """
+        raise exception.NotImplemented()  # pragma: no cover
 
     @abc.abstractmethod
     def get_region(self, region_id):
@@ -189,7 +218,7 @@ class Driver(object):
         raise exception.NotImplemented()
 
     @abc.abstractmethod
-    def update_region(self, region_id):
+    def update_region(self, region_id, region_ref):
         """Update region by id.
 
         :returns: region_ref dict

@@ -22,6 +22,9 @@ class Catalog(kvs.Base, catalog.Driver):
     def get_catalog(self, user_id, tenant_id, metadata=None):
         return self.db.get('catalog-%s-%s' % (tenant_id, user_id))
 
+    def list_regions_for_owner(self, owner):
+        return []
+
     # region crud
 
     def _delete_child_regions(self, region_id):
@@ -58,7 +61,7 @@ class Catalog(kvs.Base, catalog.Driver):
         self.db.set('region_list', list(region_list))
         return region
 
-    def list_regions(self):
+    def list_regions(self, hints):
         return [self.get_region(x) for x in self.db.get('region_list', [])]
 
     def get_region(self, region_id):

@@ -160,7 +160,8 @@ class SqlMigrateBase(tests.SQLDriverOverrides, tests.TestCase):
         self.initialize_sql()
         table = self.select_table(table_name)
         actual_cols = [col.name for col in table.columns]
-        self.assertEqual(expected_cols, actual_cols, '%s table' % table_name)
+        self.assertItemsEqual(expected_cols, actual_cols,
+                              '%s table' % table_name)
 
 
 class SqlUpgradeTests(SqlMigrateBase):
@@ -2551,6 +2552,49 @@ class SqlUpgradeTests(SqlMigrateBase):
         # Write a second region to the database with the same description
         add_region(region_nonunique)
         self.assertEqual(2, session.query(region_nonunique).count())
+
+    def test_upgrade_user_parent_user_id(self):
+        self.upgrade(45)
+
+        exp_cols = ['id', 'name', 'domain_id', 'password', 'enabled',
+                    'default_project_id', 'parent_user_id', 'extra']
+        self.assertTableColumns('user', exp_cols)
+
+    def test_downgrade_user_parent_user_id(self):
+        self.upgrade(45)
+        self.downgrade(44)
+
+        exp_cols = ['id', 'name', 'domain_id', 'password', 'enabled',
+                    'default_project_id', 'extra']
+        self.assertTableColumns('user', exp_cols)
+
+    def test_upgrade_project_payer(self):
+        self.upgrade(46)
+
+        exp_cols = ['id', 'name', 'domain_id', 'description', 'enabled',
+                    'payer', 'extra']
+        self.assertTableColumns('project', exp_cols)
+
+    def test_downgrade_project_payer(self):
+        self.upgrade(46)
+        self.downgrade(45)
+
+        exp_cols = ['id', 'name', 'domain_id', 'description', 'enabled',
+                    'extra']
+        self.assertTableColumns('project', exp_cols)
+
+    def test_upgrade_region_owner(self):
+        self.upgrade(47)
+
+        exp_cols = ['id', 'description', 'parent_region_id', 'owner', 'extra']
+        self.assertTableColumns('region', exp_cols)
+
+    def test_downgrade_region_owner(self):
+        self.upgrade(47)
+        self.downgrade(46)
+
+        exp_cols = ['id', 'description', 'parent_region_id', 'extra']
+        self.assertTableColumns('region', exp_cols)
 
     def populate_user_table(self, with_pass_enab=False,
                             with_pass_enab_domain=False):

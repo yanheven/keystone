@@ -205,6 +205,56 @@ class IdentityTestFilteredCase(filtering.FilterTests,
         self.assertEqual(len(r.result.get('users')), 1)
         self.assertEqual(r.result.get('users')[0]['id'], user['id'])
 
+    def test_list_users_filtered_by_parent_user_id(self):
+        self._set_policy({"identity:list_users": []})
+        parent_user = self.new_user_ref(domain_id=self.domainA['id'])
+        parent_user = self.identity_api.create_user(parent_user['id'],
+                                                    parent_user)
+        get_url = '/users?parent_user_id=%s' % parent_user['id']
+        r = self.get(get_url, auth=self.auth)
+        self.assertEqual(len(r.result.get('users')), 0)
+
+        user2 = self.new_user_ref(domain_id=self.domainA['id'],
+                                  parent_user_id=parent_user['id'])
+        self.identity_api.create_user(user2['id'], user2)
+        r = self.get(get_url, auth=self.auth)
+        self.assertEqual(len(r.result.get('users')), 1)
+        self.assertEqual(user2['id'], r.result.get('users')[0]['id'])
+
+        user3 = self.new_user_ref(domain_id=self.domainA['id'],
+                                  parent_user_id=parent_user['id'])
+        self.identity_api.create_user(user3['id'], user3)
+        r = self.get(get_url, auth=self.auth)
+        list_users = r.result.get('users')
+        self.assertEqual(len(list_users), 2)
+        self.assertItemsEqual([user2['id'], user3['id']],
+                              [list_users[0]['id'], list_users[1]['id']])
+
+    def test_list_regions_filtered_by_owner(self):
+        self._set_policy({"identity:list_regions": []})
+        owner_user = self.new_user_ref(domain_id=self.domainA['id'])
+        self.identity_api.create_user(owner_user['id'],
+                                      owner_user)
+        get_url = '/regions?owner=%s' % owner_user['id']
+        r = self.get(get_url, auth=self.auth)
+        self.assertEqual(len(r.result.get('regions')), 0)
+
+        region1 = self.new_region_ref()
+        region1['owner'] = owner_user['id']
+        self.catalog_api.create_region(region1)
+        r = self.get(get_url, auth=self.auth)
+        self.assertEqual(len(r.result.get('regions')), 1)
+        self.assertEqual(region1['id'], r.result.get('regions')[0]['id'])
+
+        region2 = self.new_region_ref()
+        region2['owner'] = owner_user['id']
+        self.catalog_api.create_region(region2)
+        r = self.get(get_url, auth=self.auth)
+        list_regions = r.result.get('regions')
+        self.assertEqual(len(list_regions), 2)
+        self.assertItemsEqual([region1['id'], region2['id']],
+                              [list_regions[0]['id'], list_regions[1]['id']])
+
     def test_inexact_filters(self):
         # Create 20 users
         user_list = self._create_test_data('user', 20)

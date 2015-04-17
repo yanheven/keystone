@@ -76,6 +76,10 @@ class Manager(manager.Manager):
         tenant.setdefault('enabled', True)
         tenant['enabled'] = clean.project_enabled(tenant['enabled'])
         tenant.setdefault('description', '')
+        if tenant.get('payer') is not None:
+            # Ensure that the user exists
+            self.identity_api.get_user(tenant['payer'],
+                                       domain_scope=tenant['domain_id'])
         ret = self.driver.create_project(tenant_id, tenant)
         if SHOULD_CACHE(ret):
             self.get_project.set(ret, self, tenant_id)
@@ -91,6 +95,8 @@ class Manager(manager.Manager):
 
     @notifications.updated(_PROJECT)
     def update_project(self, tenant_id, tenant):
+        if tenant.get('payer') is not None:
+            raise exception.ValidationError(_('Cannot change payer'))
         original_tenant = self.driver.get_project(tenant_id)
         tenant = tenant.copy()
         if 'enabled' in tenant:

@@ -222,6 +222,7 @@ class Auth(controller.V2Controller):
             metadata_ref['roles'] = trust_roles
             metadata_ref['trustee_user_id'] = trust_ref['trustee_user_id']
             metadata_ref['trust_id'] = trust_id
+            metadata_ref['trustor_user_id'] = trust_ref['trustor_user_id']
 
         bind = old_token_ref.get('bind')
 
@@ -257,11 +258,11 @@ class Auth(controller.V2Controller):
                                                 size=CONF.max_param_size)
 
         username = auth['passwordCredentials'].get('username', '')
-        if len(username) > CONF.max_param_size:
-            raise exception.ValidationSizeError(attribute='username',
-                                                size=CONF.max_param_size)
 
         if username:
+            if len(username) > CONF.max_param_size:
+                raise exception.ValidationSizeError(attribute='username',
+                                                    size=CONF.max_param_size)
             try:
                 user_ref = self.identity_api.get_user_by_name(
                     username, CONF.identity.default_domain_id)

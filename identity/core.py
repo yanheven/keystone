@@ -296,6 +296,9 @@ class Manager(manager.Manager):
         driver = self._select_identity_driver(domain_id)
         if not driver.is_domain_aware():
             user = self._clear_domain_id(user)
+        if user.get('parent_user_id') is not None:
+            # Ensure that the user exists
+            driver.get_user(user['parent_user_id'])
         ref = driver.create_user(user_id, user)
         if not driver.is_domain_aware():
             ref = self._set_domain_id(ref, domain_id)
@@ -333,6 +336,8 @@ class Manager(manager.Manager):
     @notifications.updated(_USER)
     @domains_configured
     def update_user(self, user_id, user_ref, domain_scope=None):
+        if user_ref.get('parent_user_id') is not None:
+            raise exception.ValidationError(_('Cannot change parent_user'))
         user = user_ref.copy()
         if 'name' in user:
             user['name'] = clean.user_name(user['name'])

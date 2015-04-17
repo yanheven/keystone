@@ -78,6 +78,7 @@ class SqlModels(SqlTests):
                 ('password', sql.String, 128),
                 ('domain_id', sql.String, 64),
                 ('enabled', sql.Boolean, None),
+                ('parent_user_id', sql.String, 64),
                 ('extra', sql.JsonBlob, None))
         self.assertExpectedSchema('user', cols)
 
@@ -323,6 +324,86 @@ class SqlIdentity(SqlTests, test_backend.IdentityTests):
         self.assertNotIn('default_project_id', user_ref)
         session.close()
 
+    def test_create_user_with_parent_user_id(self):
+        parent_user_id = uuid.uuid4().hex
+        user = {
+            'id': parent_user_id,
+            'name': uuid.uuid4().hex,
+            'domain_id': DEFAULT_DOMAIN_ID,
+            'password': uuid.uuid4().hex}
+        self.identity_api.create_user(parent_user_id, user)
+
+        child_user = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'domain_id': DEFAULT_DOMAIN_ID,
+            'password': uuid.uuid4().hex,
+            'parent_user_id': parent_user_id}
+        ref = self.identity_api.create_user(child_user['id'], child_user)
+        self.assertEqual(parent_user_id, ref['parent_user_id'])
+
+    def test_create_user_with_nonexist_parent_user_id(self):
+        child_user = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'domain_id': DEFAULT_DOMAIN_ID,
+            'password': uuid.uuid4().hex,
+            'parent_user_id': uuid.uuid4().hex}
+        self.assertRaises(exception.UserNotFound,
+                          self.identity_api.create_user,
+                          child_user['id'],
+                          child_user)
+
+    def test_update_user_with_parent_user_id_fail(self):
+        child_user = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'domain_id': DEFAULT_DOMAIN_ID,
+            'password': uuid.uuid4().hex,
+            'parent_user_id': uuid.uuid4().hex}
+        self.assertRaises(exception.ValidationError,
+                          self.identity_api.update_user,
+                          child_user['id'],
+                          child_user)
+
+    def test_create_project_with_payer(self):
+        user = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'domain_id': DEFAULT_DOMAIN_ID,
+            'password': uuid.uuid4().hex}
+        self.identity_api.create_user(user['id'], user)
+
+        tenant = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'domain_id': DEFAULT_DOMAIN_ID,
+            'payer': user['id']}
+        ref = self.assignment_api.create_project(tenant['id'], tenant)
+        self.assertEqual(user['id'], ref['payer'])
+
+    def test_create_project_with_nonexist_payer(self):
+        tenant = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'domain_id': DEFAULT_DOMAIN_ID,
+            'payer': uuid.uuid4().hex}
+        self.assertRaises(exception.UserNotFound,
+                          self.assignment_api.create_project,
+                          tenant['id'],
+                          tenant)
+
+    def test_update_project_with_payer_fail(self):
+        tenant = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'domain_id': DEFAULT_DOMAIN_ID,
+            'payer': uuid.uuid4().hex}
+        self.assertRaises(exception.ValidationError,
+                          self.assignment_api.update_project,
+                          tenant['id'],
+                          tenant)
+
 
 class SqlTrust(SqlTests, test_backend.TrustTests):
     pass
@@ -452,6 +533,69 @@ class SqlCatalog(SqlTests, test_backend.CatalogTests):
                           self.catalog_api.create_endpoint,
                           endpoint['id'],
                           endpoint.copy())
+
+    def test_create_region_with_owner(self):
+        user = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'domain_id': DEFAULT_DOMAIN_ID,
+            'password': uuid.uuid4().hex}
+        self.identity_api.create_user(user['id'], user)
+
+        region = {
+            'id': uuid.uuid4().hex,
+            'description': uuid.uuid4().hex,
+            'owner': user['id']
+        }
+        region = self.catalog_api.create_region(region)
+        self.assertEqual(user['id'], region['owner'])
+
+    def test_create_region_with_nonexist_owner(self):
+        region = {
+            'id': uuid.uuid4().hex,
+            'description': uuid.uuid4().hex,
+            'owner': uuid.uuid4().hex
+        }
+        self.assertRaises(exception.UserNotFound,
+                          self.catalog_api.create_region,
+                          region)
+
+    def test_update_region_with_owner_fail(self):
+        region = {
+            'id': uuid.uuid4().hex,
+            'description': uuid.uuid4().hex,
+        }
+        self.catalog_api.create_region(region)
+        new_region = {'owner': uuid.uuid4().hex}
+        self.assertRaises(exception.ValidationError,
+                          self.catalog_api.update_region,
+                          region['id'],
+                          new_region)
+
+    def test_list_regions_for_owner(self):
+        user = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'domain_id': DEFAULT_DOMAIN_ID,
+            'password': uuid.uuid4().hex}
+        self.identity_api.create_user(user['id'], user)
+        region1 = {
+            'id': uuid.uuid4().hex,
+            'description': uuid.uuid4().hex,
+            'owner': user['id']
+        }
+        self.catalog_api.create_region(region1)
+        region2 = {
+            'id': uuid.uuid4().hex,
+            'description': uuid.uuid4().hex,
+            'owner': user['id']
+        }
+        self.catalog_api.create_region(region2)
+
+        list_regions = self.catalog_api.list_regions_for_owner(user['id'])
+        self.assertEqual(2, len(list_regions))
+        self.assertItemsEqual([region1['id'], region2['id']],
+                              [list_regions[0]['id'], list_regions[1]['id']])
 
 
 class SqlPolicy(SqlTests, test_backend.PolicyTests):

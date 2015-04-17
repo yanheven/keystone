@@ -85,6 +85,13 @@ class AuthTest(tests.TestCase):
         #tests in this file are run alone, API calls return unauthorized.
         environment.use_eventlet(monkeypatch_thread=False)
 
+    def config_overrides(self):
+        super(AuthTest, self).config_overrides()
+        # SQL specific driver overrides
+        self.config_fixture.config(
+            group='catalog',
+            driver='keystone.catalog.backends.sql.Catalog')
+
     def assertEqualTokens(self, a, b):
         """Assert that two tokens are equal.
 
@@ -104,6 +111,14 @@ class AuthTest(tests.TestCase):
             timeutils.parse_isotime(a['access']['token']['issued_at']),
             timeutils.parse_isotime(b['access']['token']['issued_at']))
         return self.assertDictEqual(normalize(a), normalize(b))
+
+    def create_user_regions(self, user_id):
+        region = {
+            'id': uuid.uuid4().hex,
+            'description': uuid.uuid4().hex,
+            'owner': user_id
+        }
+        return self.catalog_api.create_region(region)
 
 
 class AuthBadRequests(AuthTest):
@@ -448,6 +463,25 @@ class AuthWithToken(AuthTest):
             dict(is_admin=True, query_string={}),
             token_id=token_id)
 
+    def test_user_regions_with_token(self):
+        region1 = self.create_user_regions(self.user_foo['id'])
+        region2 = self.create_user_regions(self.user_foo['id'])
+        body_dict = _build_user_auth(
+            username=self.user_foo['name'],
+            password=self.user_foo['password'])
+        token = self.controller.authenticate({}, body_dict)
+        self.assertEqual(2, len(token['access']['user_regions']))
+        self.assertItemsEqual([region1['id'], region2['id']],
+                              token['access']['user_regions'])
+
+        body_dict = _build_user_auth(
+            token=token['access']['token'],
+            tenant_name='BAR')
+        scoped_token = self.controller.authenticate({}, body_dict)
+        self.assertEqual(2, len(scoped_token['access']['user_regions']))
+        self.assertItemsEqual([region1['id'], region2['id']],
+                              scoped_token['access']['user_regions'])
+
 
 class AuthWithPasswordCredentials(AuthTest):
     def setUp(self):
@@ -555,6 +589,41 @@ class AuthWithPasswordCredentials(AuthTest):
 
         # The test is successful if this doesn't raise, so no need to assert.
         self.controller.authenticate({}, body_dict)
+
+    def test_user_regions(self):
+        region = self.create_user_regions(self.user_foo['id'])
+        body_dict = _build_user_auth(
+            username=self.user_foo['name'],
+            password=self.user_foo['password'],
+            tenant_name="BAR")
+        token = self.controller.authenticate({}, body_dict)
+        self.assertEqual(1, len(token['access']['user_regions']))
+        self.assertEqual(region['id'], token['access']['user_regions'][0])
+
+    def test_user_regions_nonexist_region(self):
+        body_dict = _build_user_auth(
+            username=self.user_foo['name'],
+            password=self.user_foo['password'],
+            tenant_name="BAR")
+        token = self.controller.authenticate({}, body_dict)
+        self.assertEqual([], token['access']['user_regions'])
+
+    def test_user_regions_with_sub_user(self):
+        region = self.create_user_regions(self.user_foo['id'])
+        user_password = uuid.uuid4().hex
+        child_user = {
+            'id': uuid.uuid4().hex,
+            'name': uuid.uuid4().hex,
+            'domain_id': DEFAULT_DOMAIN_ID,
+            'password': user_password,
+            'parent_user_id': self.user_foo['id']}
+        self.identity_api.create_user(child_user['id'], child_user)
+        body_dict = _build_user_auth(
+            username=child_user['name'],
+            password=user_password)
+        token = self.controller.authenticate({}, body_dict)
+        self.assertEqual(1, len(token['access']['user_regions']))
+        self.assertEqual(region['id'], token['access']['user_regions'][0])
 
 
 class AuthWithRemoteUser(AuthTest):
@@ -928,6 +997,14 @@ class AuthWithTrust(AuthTest):
         self.assertRaises(
             exception.Forbidden,
             self.controller.authenticate, {}, request_body)
+
+    def test_user_regions_with_trust_token(self):
+        region = self.create_user_regions(self.new_trust['trustor_user_id'])
+        request_body = self.build_v2_token_request('TWO', 'two2')
+        auth_response = self.controller.authenticate({}, request_body)
+        self.assertEqual(1, len(auth_response['access']['user_regions']))
+        self.assertEqual(region['id'],
+                         auth_response['access']['user_regions'][0])
 
 
 class TokenExpirationTest(AuthTest):

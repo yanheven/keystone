@@ -38,7 +38,8 @@ CONF = config.CONF
 class V2TokenDataHelper(object):
     """Creates V2 token data."""
     @classmethod
-    def format_token(cls, token_ref, roles_ref=None, catalog_ref=None):
+    def format_token(cls, token_ref, roles_ref=None, catalog_ref=None,
+                     user_regions=None):
         user_ref = token_ref['user']
         metadata_ref = token_ref['metadata']
         if roles_ref is None:
@@ -81,6 +82,9 @@ class V2TokenDataHelper(object):
                                     metadata_ref['trustee_user_id'],
                                     'id': metadata_ref['trust_id']
                                     }
+        if user_regions is None:
+            user_regions = []
+        o['access']['user_regions'] = user_regions
         return o
 
     @classmethod
@@ -323,7 +327,8 @@ class V3TokenDataHelper(object):
     def get_token_data(self, user_id, method_names, extras,
                        domain_id=None, project_id=None, expires=None,
                        trust=None, token=None, include_catalog=True,
-                       bind=None, access_token=None, issued_at=None):
+                       bind=None, access_token=None, issued_at=None,
+                       user_regions=None):
         token_data = {'methods': method_names,
                       'extras': extras}
 
@@ -339,6 +344,10 @@ class V3TokenDataHelper(object):
 
         if bind:
             token_data['bind'] = bind
+
+        if user_regions is None:
+            user_regions = []
+        token_data['user_regions'] = user_regions
 
         self._populate_scope(token_data, domain_id, project_id)
         self._populate_user(token_data, user_id, trust)
@@ -377,10 +386,21 @@ class BaseProvider(provider.Provider):
                 return token.provider.V3
         raise token.provider.UnsupportedTokenVersionException()
 
+    def _get_user_regions(self, user_id):
+        user_ref = self.identity_api.get_user(user_id)
+        region_owner = user_ref['id']
+        if user_ref.get('parent_user_id'):
+            region_owner = user_ref['parent_user_id']
+        return self.catalog_api.list_regions_for_owner(region_owner)
+
     def issue_v2_token(self, token_ref, roles_ref=None,
                        catalog_ref=None):
+        user_id = token_ref['user']['id']
+        if CONF.trust.enabled and 'trust_id' in token_ref['metadata']:
+            user_id = token_ref['metadata']['trustor_user_id']
+        user_regions = self._get_user_regions(user_id)
         token_data = self.v2_token_data_helper.format_token(
-            token_ref, roles_ref, catalog_ref)
+            token_ref, roles_ref, catalog_ref, user_regions=user_regions)
         token_id = self._get_token_id(token_data)
         token_data['access']['token']['id'] = token_id
         try:
@@ -431,6 +451,11 @@ class BaseProvider(provider.Provider):
             else:
                 raise exception.Forbidden(_('Oauth is disabled.'))
 
+        region_owner = user_id
+        if trust:
+            region_owner = trust['trustor_user_id']
+        user_regions = self._get_user_regions(region_owner)
+
         token_data = self.v3_token_data_helper.get_token_data(
             user_id,
             method_names,
@@ -442,7 +467,8 @@ class BaseProvider(provider.Provider):
             bind=auth_context.get('bind') if auth_context else None,
             token=token_ref,
             include_catalog=include_catalog,
-            access_token=access_token)
+            access_token=access_token,
+            user_regions=user_regions)
 
         token_id = self._get_token_id(token_data)
         try:

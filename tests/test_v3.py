@@ -203,13 +203,15 @@ class RestfulTestCase(tests.SQLDriverOverrides, rest.RestfulTestCase):
         ref['domain_id'] = domain_id
         return ref
 
-    def new_user_ref(self, domain_id, project_id=None):
+    def new_user_ref(self, domain_id, project_id=None, parent_user_id=None):
         ref = self.new_ref()
         ref['domain_id'] = domain_id
         ref['email'] = uuid.uuid4().hex
         ref['password'] = uuid.uuid4().hex
         if project_id:
             ref['default_project_id'] = project_id
+        if parent_user_id:
+            ref['parent_user_id'] = parent_user_id
         return ref
 
     def new_group_ref(self, domain_id):

@@ -30,7 +30,7 @@ CONF = config.CONF
 
 class Region(sql.ModelBase, sql.DictBase):
     __tablename__ = 'region'
-    attributes = ['id', 'description', 'parent_region_id']
+    attributes = ['id', 'description', 'parent_region_id', 'owner']
     id = sql.Column(sql.String(64), primary_key=True)
     description = sql.Column(sql.String(255))
     # NOTE(jaypipes): Right now, using an adjacency list model for
@@ -43,6 +43,7 @@ class Region(sql.ModelBase, sql.DictBase):
     #                 "left" and "right" and provide support for a nested set
     #                 model.
     parent_region_id = sql.Column(sql.String(64), nullable=True)
+    owner = sql.Column(sql.String(64))
 
     # TODO(jaypipes): I think it's absolutely stupid that every single model
     #                 is required to have an "extra" column because of the
@@ -51,6 +52,12 @@ class Region(sql.ModelBase, sql.DictBase):
     #                 bad. Remove all of this extra JSON blob stuff.
     #                 See: https://bugs.launchpad.net/keystone/+bug/1265071
     extra = sql.Column(sql.JsonBlob())
+
+    def to_dict(self, include_extra_dict=False):
+        d = super(Region, self).to_dict(include_extra_dict=include_extra_dict)
+        if 'owner' in d and d['owner'] is None:
+            del d['owner']
+        return d
 
 
 class Service(sql.ModelBase, sql.DictBase):
@@ -88,10 +95,16 @@ class Catalog(catalog.Driver):
             version=version)
 
     # Regions
-    def list_regions(self):
+    def list_regions(self, hints):
         session = sql.get_session()
-        regions = session.query(Region).all()
+        regions = session.query(Region)
+        regions = sql.filter_limit_query(Region, regions, hints)
         return [s.to_dict() for s in list(regions)]
+
+    def list_regions_for_owner(self, owner):
+        session = sql.get_session()
+        regions = session.query(Region).filter_by(owner=owner)
+        return [s.id for s in regions]
 
     def _get_region(self, session, region_id):
         ref = session.query(Region).get(region_id)

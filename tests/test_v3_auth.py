@@ -2405,6 +2405,68 @@ class TestAuthJSON(test_v3.RestfulTestCase):
         r = self.post('/auth/tokens', body=auth_data)
         self.assertValidUnscopedTokenResponse(r)
 
+    def create_user_regions(self, user_id):
+        region = {
+            'id': uuid.uuid4().hex,
+            'description': uuid.uuid4().hex,
+            'owner': user_id
+        }
+        return self.catalog_api.create_region(region)
+
+    def test_user_regions_with_password(self):
+        region = self.create_user_regions(self.user['id'])
+        r = self.post(
+            '/auth/tokens',
+            body=self.build_authentication_request(
+                user_id=self.user['id'],
+                password=self.user['password']))
+        unscoped_token = self.assertValidUnscopedTokenResponse(r)
+        self.assertEqual(1, len(unscoped_token['user_regions']))
+        self.assertEqual(region['id'], unscoped_token['user_regions'][0])
+
+    def test_user_regions_nonexist_region(self):
+        r = self.post(
+            '/auth/tokens',
+            body=self.build_authentication_request(
+                user_id=self.user['id'],
+                password=self.user['password']))
+        unscoped_token = self.assertValidUnscopedTokenResponse(r)
+        self.assertEqual([], unscoped_token['user_regions'])
+
+    def test_user_regions_with_sub_user(self):
+        child_user = self.new_user_ref(self.user['domain_id'],
+                                       parent_user_id=self.user['id'])
+        self.identity_api.create_user(child_user['id'], child_user)
+        region = self.create_user_regions(self.user['id'])
+        r = self.post(
+            '/auth/tokens',
+            body=self.build_authentication_request(
+                user_id=child_user['id'],
+                password=child_user['password']))
+        unscoped_token = self.assertValidUnscopedTokenResponse(r)
+        self.assertEqual(1, len(unscoped_token['user_regions']))
+        self.assertEqual(region['id'], unscoped_token['user_regions'][0])
+
+    def test_user_regions_with_token_id(self):
+        region1 = self.create_user_regions(self.user['id'])
+        region2 = self.create_user_regions(self.user['id'])
+        r = self.post(
+            '/auth/tokens',
+            body=self.build_authentication_request(
+                user_id=self.user['id'],
+                password=self.user['password']))
+        unscoped_token = r.headers.get('X-Subject-Token')
+
+        r = self.post(
+            '/auth/tokens',
+            body=self.build_authentication_request(
+                token=unscoped_token,
+                project_id=self.project_id))
+        scoped_token = self.assertValidScopedTokenResponse(r)
+        self.assertEqual(2, len(scoped_token['user_regions']))
+        self.assertItemsEqual([region1['id'], region2['id']],
+                              scoped_token['user_regions'])
+
 
 class TestAuthXML(TestAuthJSON):
     content_type = 'xml'
@@ -3110,6 +3172,35 @@ class TestTrustAuth(TestAuthInfo):
             auth=auth_data,
             expected_status=200)
         self.assertValidRoleResponse(r, self.role)
+
+    def test_user_regions_with_trust(self):
+        region = {
+            'id': uuid.uuid4().hex,
+            'description': uuid.uuid4().hex,
+            'owner': self.user_id
+        }
+        region = self.catalog_api.create_region(region)
+
+        ref = self.new_trust_ref(
+            trustor_user_id=self.user_id,
+            trustee_user_id=self.trustee_user_id,
+            project_id=self.project_id,
+            impersonation=False,
+            expires=dict(minutes=1),
+            role_ids=[self.role_id])
+        del ref['id']
+
+        r = self.post('/OS-TRUST/trusts', body={'trust': ref})
+        trust = self.assertValidTrustResponse(r)
+
+        auth_data = self.build_authentication_request(
+            user_id=self.trustee_user['id'],
+            password=self.trustee_user['password'],
+            trust_id=trust['id'])
+        r = self.post('/auth/tokens', body=auth_data)
+        scoped_token = self.assertValidTokenResponse(r)
+        self.assertEqual(1, len(scoped_token['user_regions']))
+        self.assertEqual(region['id'], scoped_token['user_regions'][0])
 
 
 class TestAPIProtectionWithoutAuthContextMiddleware(test_v3.RestfulTestCase):

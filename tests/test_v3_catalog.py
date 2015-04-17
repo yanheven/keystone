@@ -103,6 +103,20 @@ class CatalogTestCase(test_v3.RestfulTestCase):
             body={'region': ref},
             expected_status=400)
 
+    def test_create_region_with_owner(self):
+        user = self.new_user_ref(domain_id=test_v3.DEFAULT_DOMAIN_ID)
+        self.identity_api.create_user(user['id'], user)
+
+        ref = self.new_region_ref()
+        ref['owner'] = user['id']
+
+        r = self.post(
+            '/regions',
+            body={'region': ref},
+            expected_status=201)
+        region = self.assertValidRegionResponse(r, ref)
+        self.assertEqual(user['id'], region['owner'])
+
     def test_list_regions(self):
         """Call ``GET /regions``."""
         r = self.get('/regions')

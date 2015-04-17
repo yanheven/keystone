@@ -404,6 +404,19 @@ class IdentityTestCase(test_v3.RestfulTestCase):
         """Call ``POST /projects``."""
         self.post('/projects', body={'project': {}}, expected_status=400)
 
+    def test_create_project_with_payer(self):
+        user = self.new_user_ref(domain_id=self.domain_id)
+        user_id = user['id']
+        self.identity_api.create_user(user_id, user)
+
+        ref = self.new_project_ref(domain_id=self.domain_id)
+        ref['payer'] = user_id
+        r = self.post(
+            '/projects',
+            body={'project': ref})
+        project = self.assertValidProjectResponse(r, ref)
+        self.assertEqual(user_id, project['payer'])
+
     def test_get_project(self):
         """Call ``GET /projects/{project_id}``."""
         r = self.get(
@@ -420,6 +433,16 @@ class IdentityTestCase(test_v3.RestfulTestCase):
                 'project_id': self.project_id},
             body={'project': ref})
         self.assertValidProjectResponse(r, ref)
+
+    def test_update_project_with_payer_fail(self):
+        ref = self.new_project_ref(domain_id=self.domain_id)
+        ref['payer'] = self.user_id
+        del ref['id']
+        self.patch(
+            '/projects/%(project_id)s' % {
+                'project_id': self.project_id},
+            body={'project': ref},
+            expected_status=exception.ValidationError.code)
 
     def test_update_project_domain_id(self):
         """Call ``PATCH /projects/{project_id}`` with domain_id."""
@@ -486,6 +509,16 @@ class IdentityTestCase(test_v3.RestfulTestCase):
     def test_create_user_400(self):
         """Call ``POST /users``."""
         self.post('/users', body={'user': {}}, expected_status=400)
+
+    def test_create_user_with_parent_user_id(self):
+        parent_user = self.test_create_user()
+        ref = self.new_user_ref(domain_id=self.domain_id,
+                                parent_user_id=parent_user['id'])
+        r = self.post(
+            '/users',
+            body={'user': ref})
+        user = self.assertValidUserResponse(r, ref)
+        self.assertEqual(parent_user['id'], user['parent_user_id'])
 
     def test_list_users(self):
         """Call ``GET /users``."""
@@ -592,6 +625,15 @@ class IdentityTestCase(test_v3.RestfulTestCase):
             'user_id': self.user['id']},
             body={'user': user})
         self.assertValidUserResponse(r, user)
+
+    def test_update_user_with_parent_user_id_fail(self):
+        user = self.new_user_ref(domain_id=self.domain_id,
+                                 parent_user_id=uuid.uuid4().hex)
+        del user['id']
+        self.patch('/users/%(user_id)s' % {
+            'user_id': self.user['id']},
+            body={'user': user},
+            expected_status=exception.ValidationError.code)
 
     def test_update_user_domain_id(self):
         """Call ``PATCH /users/{user_id}`` with domain_id."""
